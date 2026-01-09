@@ -28,20 +28,24 @@ npm run dev
 
 3. Open [http://localhost:3000](http://localhost:3000) in your browser
 
-## Deployment (Permanent Free!)
+## Deployment (100% Free Forever!)
 
-**Recommended: Fly.io** - Truly permanent free hosting for Socket.io apps!
+**Firebase Hosting** - Completely free, no payment method needed!
 
-1. Install Fly CLI: `brew install flyctl` (or see DEPLOY.md)
-2. Login: `fly auth login`
-3. Deploy: `fly launch`
-4. Done! Your app is live permanently at `https://your-app.fly.dev` 🚀
+1. Create project at [Firebase Console](https://console.firebase.google.com)
+2. Enable Realtime Database
+3. Copy your config to `.env.local`
+4. Run `npm install -g firebase-tools && firebase login`
+5. Run `firebase init hosting` then `npm run deploy`
+6. Done! Your app is live at `https://your-project.web.app` 🚀
 
 **Free Tier Includes:**
-- 3 shared VMs (256MB each)
-- 160GB data transfer/month
-- Automatic HTTPS
-- Never expires - truly permanent!
+- 1 GB storage
+- 10 GB/month bandwidth
+- Free SSL/HTTPS
+- Custom domains
+- No credit card required
+- Never expires!
 
 See `DEPLOY.md` for detailed step-by-step instructions.
 

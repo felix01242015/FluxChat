@@ -1,138 +1,179 @@
 import { useState, useEffect, useRef } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { database } from '@/lib/firebase';
+import { ref, push, onValue, off, set, onDisconnect, serverTimestamp, get } from 'firebase/database';
 import Head from 'next/head';
 
 interface Message {
   id: string;
   message: string;
   username: string;
-  timestamp: string;
+  timestamp: number;
 }
 
 interface User {
   id: string;
   username: string;
+  lastSeen: number;
 }
 
 export default function Home() {
-  const [socket, setSocket] = useState<Socket | null>(null);
   const [username, setUsername] = useState('');
   const [usernameInput, setUsernameInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageInput, setMessageInput] = useState('');
   const [users, setUsers] = useState<User[]>([]);
-  const [isTyping, setIsTyping] = useState(false);
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const userIdRef = useRef<string>('');
+  const userRefRef = useRef<any>(null);
 
   useEffect(() => {
-    const newSocket = io({
-      path: '/api/socket',
+    // Listen to messages
+    const messagesRef = ref(database, 'messages');
+    const unsubscribeMessages = onValue(messagesRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const messagesData = snapshot.val();
+        const messagesList: Message[] = Object.entries(messagesData)
+          .map(([id, data]: [string, any]) => ({
+            id,
+            ...data,
+          }))
+          .sort((a, b) => a.timestamp - b.timestamp);
+        setMessages(messagesList);
+      } else {
+        setMessages([]);
+      }
     });
 
-    newSocket.on('connect', () => {
-      console.log('Connected to server');
-      setSocket(newSocket);
+    // Listen to users
+    const usersRef = ref(database, 'users');
+    const unsubscribeUsers = onValue(usersRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const usersData = snapshot.val();
+        const now = Date.now();
+        const usersList: User[] = Object.entries(usersData)
+          .map(([id, data]: [string, any]) => ({
+            id,
+            ...data,
+          }))
+          .filter((user) => now - user.lastSeen < 30000); // Only show users active in last 30 seconds
+        setUsers(usersList);
+      } else {
+        setUsers([]);
+      }
     });
 
-    newSocket.on('message', (data: Message) => {
-      setMessages((prev) => [...prev, data]);
-    });
-
-    newSocket.on('userJoined', (data: { username: string }) => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: 'system',
-          message: `${data.username} joined the chat`,
-          username: 'System',
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-    });
-
-    newSocket.on('userLeft', (data: { username: string }) => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: 'system',
-          message: `${data.username} left the chat`,
-          username: 'System',
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-    });
-
-    newSocket.on('userList', (userList: User[]) => {
-      setUsers(userList);
-    });
-
-    newSocket.on('typing', (data: { username: string; isTyping: boolean }) => {
-      setTypingUsers((prev) => {
-        const newSet = new Set(prev);
-        if (data.isTyping) {
-          newSet.add(data.username);
-        } else {
-          newSet.delete(data.username);
-        }
-        return newSet;
-      });
+    // Listen to typing indicators
+    const typingRef = ref(database, 'typing');
+    const unsubscribeTyping = onValue(typingRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const typingData = snapshot.val();
+        const typingSet = new Set<string>();
+        Object.entries(typingData).forEach(([user, isTyping]: [string, any]) => {
+          if (isTyping && user !== username) {
+            typingSet.add(user);
+          }
+        });
+        setTypingUsers(typingSet);
+      } else {
+        setTypingUsers(new Set());
+      }
     });
 
     return () => {
-      newSocket.close();
+      off(messagesRef);
+      off(usersRef);
+      off(typingRef);
+      if (userRefRef.current) {
+        set(userRefRef.current, null);
+      }
     };
-  }, []);
+  }, [username]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleUsernameSubmit = (e: React.FormEvent) => {
+  const handleUsernameSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (usernameInput.trim() && socket) {
-      setUsername(usernameInput.trim());
-      socket.emit('join', usernameInput.trim());
+    if (usernameInput.trim()) {
+      const newUsername = usernameInput.trim();
+      setUsername(newUsername);
+      
+      // Generate unique user ID
+      const userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      userIdRef.current = userId;
+      
+      // Add user to online users
+      const userRef = ref(database, `users/${userId}`);
+      userRefRef.current = userRef;
+      
+      await set(userRef, {
+        username: newUsername,
+        lastSeen: Date.now(),
+      });
+
+      // Set up disconnect handler
+      onDisconnect(userRef).set(null);
+
+      // Update last seen every 10 seconds
+      const interval = setInterval(() => {
+        if (userRefRef.current) {
+          set(userRefRef.current, {
+            username: newUsername,
+            lastSeen: Date.now(),
+          });
+        }
+      }, 10000);
+
+      // Add system message
+      await push(ref(database, 'messages'), {
+        message: `${newUsername} joined the chat`,
+        username: 'System',
+        timestamp: Date.now(),
+      });
+
       setUsernameInput('');
     }
   };
 
-  const handleMessageSubmit = (e: React.FormEvent) => {
+  const handleMessageSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (messageInput.trim() && socket && username) {
-      socket.emit('message', {
+    if (messageInput.trim() && username) {
+      await push(ref(database, 'messages'), {
         message: messageInput.trim(),
         username,
+        timestamp: Date.now(),
       });
       setMessageInput('');
       handleStopTyping();
     }
   };
 
-  const handleTyping = () => {
-    if (socket && username && !isTyping) {
-      setIsTyping(true);
-      socket.emit('typing', { username, isTyping: true });
-    }
+  const handleTyping = async () => {
+    if (username) {
+      const typingRef = ref(database, `typing/${username}`);
+      await set(typingRef, true);
 
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
 
-    typingTimeoutRef.current = setTimeout(() => {
-      handleStopTyping();
-    }, 1000);
-  };
-
-  const handleStopTyping = () => {
-    if (socket && username && isTyping) {
-      setIsTyping(false);
-      socket.emit('typing', { username, isTyping: false });
+      typingTimeoutRef.current = setTimeout(() => {
+        handleStopTyping();
+      }, 1000);
     }
   };
 
-  const formatTime = (timestamp: string) => {
+  const handleStopTyping = async () => {
+    if (username) {
+      const typingRef = ref(database, `typing/${username}`);
+      await set(typingRef, false);
+    }
+  };
+
+  const formatTime = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
@@ -211,9 +252,9 @@ export default function Home() {
           <div className="flex-1 flex flex-col bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden">
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {messages.map((msg, idx) => (
+              {messages.map((msg) => (
                 <div
-                  key={`${msg.id}-${idx}`}
+                  key={msg.id}
                   className={`flex ${
                     msg.username === username ? 'justify-end' : 'justify-start'
                   }`}
@@ -310,4 +351,3 @@ export default function Home() {
     </>
   );
 }
-

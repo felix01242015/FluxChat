@@ -28,19 +28,22 @@ npm run dev
 
 3. Open [http://localhost:3000](http://localhost:3000) in your browser
 
-## Deployment (Free!)
+## Deployment (Permanent Free!)
 
-**Recommended: Railway** - Perfect for Socket.io apps!
+**Recommended: Fly.io** - Truly permanent free hosting for Socket.io apps!
 
-1. Push your code to GitHub
-2. Go to [railway.app](https://railway.app) and sign up (free)
-3. Click "New Project" → "Deploy from GitHub repo"
-4. Select your FluxChat repository
-5. Railway auto-detects and deploys - done! 🚀
+1. Install Fly CLI: `brew install flyctl` (or see DEPLOY.md)
+2. Login: `fly auth login`
+3. Deploy: `fly launch`
+4. Done! Your app is live permanently at `https://your-app.fly.dev` 🚀
 
-You'll get a free `.railway.app` URL with HTTPS included.
+**Free Tier Includes:**
+- 3 shared VMs (256MB each)
+- 160GB data transfer/month
+- Automatic HTTPS
+- Never expires - truly permanent!
 
-See `DEPLOY.md` for detailed instructions.
+See `DEPLOY.md` for detailed step-by-step instructions.
 
 ## Tech Stack
 
